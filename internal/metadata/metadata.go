@@ -2,7 +2,7 @@ package metadata
 
 import (
 	"errors"
-	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -10,7 +10,12 @@ import (
 )
 
 type Metadata struct {
-	dict map[string]interface{}
+	raw           map[string]interface{}
+	total_size    int64
+	files         map[string]int64
+	announce_urls []string
+	piece_length  int64
+	pieces        [][]byte
 }
 
 func (m *Metadata) GetMetadata(filepath string) (err error) {
@@ -18,48 +23,75 @@ func (m *Metadata) GetMetadata(filepath string) (err error) {
 	if err != nil {
 		return
 	}
-	err = bencode.Unmarshal([]byte(filedat), &m.dict)
+	err = bencode.Unmarshal([]byte(filedat), &m.raw)
 	return
 }
 
-func (m *Metadata) Print() error {
-	info, in := m.dict["info"]
+func (m *Metadata) Parse() error {
+	if m.raw == nil {
+		return errors.New("Metadata dict empty.")
+	}
+	info, in := m.raw["info"]
 	if in {
-		info_map, _ := info.(map[string]interface{})
-		name, in := info_map["name"]
-		if in {
-			if str, ok := name.(string); ok {
-				fmt.Println("Name: ", str)
-			}
-		}
-		length, in := info_map["length"]
+		info := info.(map[string]interface{})
+
+		// Piece Length
+		m.piece_length = info["piece length"].(int64)
+
+		// Total size
+		m.total_size = 0
+
+		// Files
+		m.files = make(map[string]int64)
+		name, _ := info["name"]
+
+		length, in := info["length"]
 		if in {
 			// Single file mode
-			fmt.Printf("Length: %v\n", length)
-		}
-		files, in := info_map["files"]
-		if in {
-			fmt.Println("FILES: ")
+			m.files[name.(string)] = length.(int64)
+			m.total_size += length.(int64)
+		} else {
 			// Multifile mode
-			files, _ := files.([]interface{})
-			for _, file := range files {
+			for _, file := range info["files"].([]interface{}) {
 				file, _ := file.(map[string]interface{})
-				fmt.Printf("\tLength: %v\n", file["length"])
 
+				// Converting path list of interface{} to path list of string
 				paths := make([]string, len(file["path"].([]interface{})))
+				paths = append(paths, name.(string))
 				for _, value := range file["path"].([]interface{}) {
 					paths = append(paths, value.(string))
 				}
-				fmt.Printf("\tPath: %s\n", filepath.Join(paths...))
+				m.files[filepath.Join(paths...)] = file["length"].(int64)
+				m.total_size += file["length"].(int64)
 			}
 		}
+
+		// Pieces
+		m.pieces = make([][]byte, int(math.Ceil(float64(m.total_size)/float64(m.piece_length))))
+
+		// byte string of concatination of all 20 bytes SHA1 hash value of pieces
+		pieces := info["pieces"].(string)
+		for i := 0; i < len(pieces); i += 20 {
+			end := i + 20
+			if end > len(pieces) {
+				end = len(pieces)
+			}
+			m.pieces[i/20] = []byte(pieces[i:end])
+		}
+
 	} else {
 		return errors.New("info not present in torrent file")
 	}
-	announce, in := m.dict["announce"]
+	announce, in := m.raw["announce"]
 	if in {
-		if str, ok := announce.(string); ok {
-			fmt.Println("Announce: ", str)
+		m.announce_urls = append(m.announce_urls, announce.(string))
+	}
+	announce_list, in := m.raw["announce-list"]
+	if in {
+		for _, urlList := range announce_list.([]interface{}) {
+			for _, url := range urlList.([]interface{}) {
+				m.announce_urls = append(m.announce_urls, url.(string))
+			}
 		}
 	}
 

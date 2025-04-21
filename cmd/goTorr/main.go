@@ -14,6 +14,6 @@ func main() {
 	var mdata metadata.Metadata
 	err := mdata.GetMetadata("/mnt/exthome/dev_tmp/goTorr/cowboyBebop.torrent")
 	check(err)
-	err = mdata.Print()
+	err = mdata.Parse()
 	check(err)
 }
