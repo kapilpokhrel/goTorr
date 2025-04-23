@@ -16,4 +16,5 @@ func main() {
 	check(err)
 	err = mdata.Parse()
 	check(err)
+	mdata.Print()
 }

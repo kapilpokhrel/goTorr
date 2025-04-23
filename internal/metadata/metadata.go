@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	bencode "github.com/anacrolix/torrent/bencode"
+	"github.com/davecgh/go-spew/spew"
 )
 
 type Metadata struct {
@@ -96,4 +97,13 @@ func (m *Metadata) Parse() error {
 	}
 
 	return nil
+}
+
+func (m *Metadata) Print() {
+	spew.Printf("Total Size: %v\n", m.total_size)
+	spew.Printf("Piece Length: %v\n", m.piece_length)
+	spew.Printf("Files:\n")
+	spew.Dump(m.files)
+	spew.Printf("AnnounceUrls:\n")
+	spew.Dump(m.announce_urls)
 }
