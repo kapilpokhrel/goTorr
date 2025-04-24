@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/kapilpokhrel/goTorr/internal/metadata"
+	"goTorr/internal/metadata"
 )
 
 func check(e error) {
