@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"crypto/sha1"
 	"errors"
 	"math"
 	"os"
@@ -11,12 +12,12 @@ import (
 )
 
 type Metadata struct {
-	raw           map[string]interface{}
-	total_size    int64
-	files         map[string]int64
-	announce_urls []string
-	piece_length  int64
-	pieces        [][]byte
+	raw          map[string]interface{}
+	TotalSize    uint64
+	Files        map[string]int64
+	AnnounceUrls []string
+	PieceLength  int64
+	Pieces       [][]byte
 }
 
 func (m *Metadata) GetMetadata(filepath string) (err error) {
@@ -28,6 +29,18 @@ func (m *Metadata) GetMetadata(filepath string) (err error) {
 	return
 }
 
+func (m *Metadata) GetInfoHash() (infohash [20]byte, err error) {
+	if m.raw == nil {
+		err = errors.New("Metadat empty")
+		return
+	}
+	bencoded_info, err := bencode.Marshal(m.raw["info"])
+	if err != nil {
+		return
+	}
+	return sha1.Sum(bencoded_info), nil
+
+}
 func (m *Metadata) Parse() error {
 	if m.raw == nil {
 		return errors.New("Metadata dict empty.")
@@ -37,20 +50,20 @@ func (m *Metadata) Parse() error {
 		info := info.(map[string]interface{})
 
 		// Piece Length
-		m.piece_length = info["piece length"].(int64)
+		m.PieceLength = info["piece length"].(int64)
 
 		// Total size
-		m.total_size = 0
+		m.TotalSize = 0
 
 		// Files
-		m.files = make(map[string]int64)
+		m.Files = make(map[string]int64)
 		name, _ := info["name"]
 
 		length, in := info["length"]
 		if in {
 			// Single file mode
-			m.files[name.(string)] = length.(int64)
-			m.total_size += length.(int64)
+			m.Files[name.(string)] = length.(int64)
+			m.TotalSize += uint64(length.(int64))
 		} else {
 			// Multifile mode
 			for _, file := range info["files"].([]interface{}) {
@@ -62,13 +75,13 @@ func (m *Metadata) Parse() error {
 				for _, value := range file["path"].([]interface{}) {
 					paths = append(paths, value.(string))
 				}
-				m.files[filepath.Join(paths...)] = file["length"].(int64)
-				m.total_size += file["length"].(int64)
+				m.Files[filepath.Join(paths...)] = file["length"].(int64)
+				m.TotalSize += uint64(file["length"].(int64))
 			}
 		}
 
 		// Pieces
-		m.pieces = make([][]byte, int(math.Ceil(float64(m.total_size)/float64(m.piece_length))))
+		m.Pieces = make([][]byte, int(math.Ceil(float64(m.TotalSize)/float64(m.PieceLength))))
 
 		// byte string of concatination of all 20 bytes SHA1 hash value of pieces
 		pieces := info["pieces"].(string)
@@ -77,7 +90,7 @@ func (m *Metadata) Parse() error {
 			if end > len(pieces) {
 				end = len(pieces)
 			}
-			m.pieces[i/20] = []byte(pieces[i:end])
+			m.Pieces[i/20] = []byte(pieces[i:end])
 		}
 
 	} else {
@@ -85,13 +98,13 @@ func (m *Metadata) Parse() error {
 	}
 	announce, in := m.raw["announce"]
 	if in {
-		m.announce_urls = append(m.announce_urls, announce.(string))
+		m.AnnounceUrls = append(m.AnnounceUrls, announce.(string))
 	}
 	announce_list, in := m.raw["announce-list"]
 	if in {
 		for _, urlList := range announce_list.([]interface{}) {
 			for _, url := range urlList.([]interface{}) {
-				m.announce_urls = append(m.announce_urls, url.(string))
+				m.AnnounceUrls = append(m.AnnounceUrls, url.(string))
 			}
 		}
 	}
@@ -100,10 +113,10 @@ func (m *Metadata) Parse() error {
 }
 
 func (m *Metadata) Print() {
-	spew.Printf("Total Size: %v\n", m.total_size)
-	spew.Printf("Piece Length: %v\n", m.piece_length)
+	spew.Printf("Total Size: %v\n", m.TotalSize)
+	spew.Printf("Piece Length: %v\n", m.PieceLength)
 	spew.Printf("Files:\n")
-	spew.Dump(m.files)
+	spew.Dump(m.Files)
 	spew.Printf("AnnounceUrls:\n")
-	spew.Dump(m.announce_urls)
+	spew.Dump(m.AnnounceUrls)
 }
