@@ -15,6 +15,7 @@ type Metadata struct {
 	raw          map[string]interface{}
 	TotalSize    uint64
 	Files        map[string]int64
+	FileOrder    []string
 	AnnounceUrls []string
 	PieceLength  int64
 	Pieces       [][]byte
@@ -64,8 +65,10 @@ func (m *Metadata) Parse() error {
 			// Single file mode
 			m.Files[name.(string)] = length.(int64)
 			m.TotalSize += uint64(length.(int64))
+			m.FileOrder = []string{name.(string)}
 		} else {
 			// Multifile mode
+			m.FileOrder = make([]string, 0, len(info["files"].([]interface{})))
 			for _, file := range info["files"].([]interface{}) {
 				file, _ := file.(map[string]interface{})
 
@@ -76,6 +79,7 @@ func (m *Metadata) Parse() error {
 					paths = append(paths, value.(string))
 				}
 				m.Files[filepath.Join(paths...)] = file["length"].(int64)
+				m.FileOrder = append(m.FileOrder, filepath.Join(paths...))
 				m.TotalSize += uint64(file["length"].(int64))
 			}
 		}
