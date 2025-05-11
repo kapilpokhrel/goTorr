@@ -32,7 +32,7 @@ type Peer struct {
 	closeChan                chan string
 	requested                int // requested data from peer
 	lastMessageTime          time.Time
-	lastNonKeepAliveResponse time.Time //For closing connection
+	lastNonKeepAliveResponse time.Time // For closing connection
 	Torrent                  *torrent.Torrent
 }
 
@@ -125,7 +125,6 @@ func (peer *Peer) waitForHandShake() (err error) {
 	peer.lastMessageTime = time.Now()
 	peer.lastNonKeepAliveResponse = time.Now()
 	return nil
-
 }
 
 func (peer *Peer) StartListening() {
@@ -248,7 +247,6 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 			peer.SendKeepAlive()
 		}
 	}
-
 }
 
 func (peer *Peer) Close(err error) {
@@ -256,7 +254,10 @@ func (peer *Peer) Close(err error) {
 		defer peer.conn.Close()
 	}
 	peer.stopPeer <- true
-	peer.closeChan <- peer.conn.RemoteAddr().String()
+	select {
+	case peer.closeChan <- peer.conn.RemoteAddr().String():
+	default:
+	}
 }
 
 func (peer *Peer) SendKeepAlive() error {
@@ -276,7 +277,7 @@ func (peer *Peer) SendMessage(id uint8, buffer []byte) error {
 	_, err := peer.conn.Write(buf.Bytes())
 	if err == nil {
 		peer.lastMessageTime = time.Now()
-		//fmt.Printf("Sent id %d, data %v\n", id, buffer)
+		// fmt.Printf("Sent id %d, data %v\n", id, buffer)
 	}
 	return err
 }

@@ -8,7 +8,6 @@ import (
 	"goTorr/internal/torrent"
 	"goTorr/internal/tracker"
 	"sync"
-	"time"
 )
 
 func check(e error) {
@@ -21,16 +20,16 @@ func main() {
 	// Metadata .torrent parsing
 	var mdata metadata.Metadata
 	//err := mdata.GetMetadata("/mnt/exthome/dev_tmp/goTorr/cowboyBebop.torrent")
-	err := mdata.GetMetadata("/home/kapil/Downloads/medicalimgDL.torrent")
+	err := mdata.GetMetadata("/home/kapil/Downloads/mpeg7Shape1.torrent")
 	check(err)
 	err = mdata.Parse()
 	check(err)
-	
+
 	mdata.Print()
 	// Torrent
 	info_hash, err := mdata.GetInfoHash()
 	if err != nil {
-		panic(err)
+		check(err)
 	}
 
 	torrentinfoChan := make(chan int)
@@ -64,14 +63,10 @@ func main() {
 			break
 		}
 	}
-	
-	if err != nil {
-		panic(err)
-	} 
 
 	peercloseChan := make(chan string)
 	exitChan := make(chan int)
-	peerMap := make(map[string]*peerprotocol.Peer)
+	peerManager := peerprotocol.NewPeerManager(currtorrent, client.PeerID, peercloseChan)
 	var wg sync.WaitGroup
 
 	infoListener := func() {
@@ -82,9 +77,11 @@ func main() {
 				return
 			case peerAddr := <-peercloseChan:
 				fmt.Printf("Peer %s closed.\n", peerAddr)
-				delete(peerMap, peerAddr)
-				if len(peerMap) == 0 {
-					fmt.Printf("No active peers, exitting for now...")
+				peerManager.RemovePeer(peerAddr)
+
+				if peerManager.Count() == 0 {
+					fmt.Println("No active peers left, exiting for now...")
+					exitChan <- 1
 					return
 				}
 			case torrinfo := <-torrentinfoChan:
@@ -92,7 +89,6 @@ func main() {
 				case torrent.InfoCompleted:
 					fmt.Println("Completed")
 					currtorrent.Close()
-					clear(peerMap)
 					return
 				case torrent.InfoPieceComplete:
 					pieceindex := <-torrentinfoChan
@@ -105,30 +101,17 @@ func main() {
 		}
 	}
 
-	peerAdder := func() {
-
-		for _, peerAddr := range peers {
-			peer := peerprotocol.NewPeer(currtorrent, peercloseChan)
-			err = peer.Establish_Conn(peerAddr, client.PeerID[:])
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			go peer.PeerChecker(time.Minute)
-			go peer.StartListening()
-			peerMap[peerAddr] = peer
-			fmt.Printf("Peer %s Added.\n", peerAddr)
-
-		}
-		if len(peerMap) == 0 {
-			fmt.Println("No Peers found")
-			exitChan <- 1
-		}
-	}
 	wg.Add(1)
 	go infoListener()
-	go peerAdder()
+	go func() {
+		peerManager.AddPeers(peers)
+		if peerManager.Count() == 0 {
+			fmt.Println("No Peers found, exitting for now...")
+			exitChan <- 1
+		}
+	}()
 
 	wg.Wait()
+	peerManager.Clear()
 	return
 }

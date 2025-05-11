@@ -70,7 +70,7 @@ func sendUDPConnect(conn *net.UDPConn, tID []byte) (connID []byte, err error) {
 	conn.Write(reqBuf)
 
 	// Connect Response
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(25 * time.Second))
 	respBuf := make([]byte, 16)
 	n, _, err := conn.ReadFromUDP(respBuf)
 	conn.SetReadDeadline(time.Time{}) //reset timeout
@@ -185,7 +185,7 @@ func SendUDPTrackerAnnounce(
 }
 
 func parseHTTPAnnounceResp(httpResp []byte) (parsedResp trackerResp, err error) {
-	
+
 	respMap := make(map[string]any)
 	err = bencode.Unmarshal(httpResp, &respMap)
 	if err != nil {
@@ -209,8 +209,16 @@ func parseHTTPAnnounceResp(httpResp []byte) (parsedResp trackerResp, err error) 
 	if isin {
 		minInterval = respMinInterval.(int64)
 	}
-	seeders := respMap["complete"].(int64)
-	leechers := respMap["incomplete"].(int64)
+	seeders := int64(-1)
+	leechers := int64(-1)
+	_, isin = respMap["complete"]
+	if isin {
+		seeders = respMap["complete"].(int64)
+	}
+	_, isin = respMap["incomplete"]
+	if isin {
+		seeders = respMap["incomplete"].(int64)
+	}
 
 	decodedPeers := respMap["peers"].([]any)
 	peers := make([]map[string]any, len(decodedPeers))
@@ -221,7 +229,7 @@ func parseHTTPAnnounceResp(httpResp []byte) (parsedResp trackerResp, err error) 
 	return trackerResp{
 		int(interval),
 		int(minInterval),
-		trackerid, 
+		trackerid,
 		int(seeders),
 		int(leechers),
 		peersList,
@@ -275,11 +283,11 @@ func SendHTTPTrackerAnnounce(
 
 	if httpResp.StatusCode != http.StatusOK {
 		err = fmt.Errorf("HTTP Error (%d) :%w", httpResp.StatusCode, err)
-		return 
+		return
 	}
 
 	respBytes, _ := io.ReadAll(httpResp.Body)
-	
+
 	return parseHTTPAnnounceResp(respBytes)
 }
 

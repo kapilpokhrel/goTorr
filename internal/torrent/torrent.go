@@ -182,22 +182,26 @@ func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 	currTorrent.pieces[index].blocks[blockIndex] = true
 	currTorrent.Downloaded += uint64(len(piecedata))
 
+	currTorrent.mu.Unlock()
 	currTorrent.wg.Add(1)
 	go currTorrent.writeBlocktoFile(index, begin, piecedata)
-	currTorrent.mu.Unlock()
 
 	// Check if piece is complete
 	if all(currTorrent.pieces[index].blocks) {
 		currTorrent.pieces[index].completed = true
 
+		currTorrent.mu.Lock()
 		currTorrent.torrentinfoChan <- InfoPieceComplete
 		currTorrent.torrentinfoChan <- int(index)
+		currTorrent.mu.Unlock()
 	}
 
 	if currTorrent.Downloaded == currTorrent.TotalSize {
 		// Download Complete
 		currTorrent.wg.Wait()
+		currTorrent.mu.Lock()
 		currTorrent.torrentinfoChan <- InfoCompleted
+		currTorrent.mu.Unlock()
 	}
 }
 
@@ -247,8 +251,10 @@ func (currTorrent *Torrent) writeBlocktoFile(index, begin uint32, piecedata []by
 
 		if file.written == file.size {
 			file.filep.Sync()
+			currTorrent.mu.Lock()
 			currTorrent.torrentinfoChan <- InfoFileComplete
 			currTorrent.torrentinfoChan <- file_index
+			currTorrent.mu.Unlock()
 		}
 
 		if toWrite < remainingPiecedata {
