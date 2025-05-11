@@ -20,11 +20,13 @@ func check(e error) {
 func main() {
 	// Metadata .torrent parsing
 	var mdata metadata.Metadata
-	err := mdata.GetMetadata("/mnt/exthome/dev_tmp/goTorr/thermo.torrent")
+	//err := mdata.GetMetadata("/mnt/exthome/dev_tmp/goTorr/cowboyBebop.torrent")
+	err := mdata.GetMetadata("/home/kapil/Downloads/medicalimgDL.torrent")
 	check(err)
 	err = mdata.Parse()
 	check(err)
-
+	
+	mdata.Print()
 	// Torrent
 	info_hash, err := mdata.GetInfoHash()
 	if err != nil {
@@ -48,8 +50,24 @@ func main() {
 	client := client.NewClient()
 
 	// Announce
-	peers, err := tracker.SendTrackerAnnounce(mdata.AnnounceUrls[1], currtorrent, client.PeerID[:])
-
+	peers := make([]string, 0)
+	for _, url := range mdata.AnnounceUrls {
+		fmt.Printf("Announcing on %s\n", url)
+		plist, err := tracker.SendTrackerAnnounce(url, currtorrent, client.PeerID[:])
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			continue
+		}
+		peers = append(peers, plist...)
+		if len(peers) > 20 {
+			// We have got enough peers for us now
+			break
+		}
+	}
+	
+	if err != nil {
+		panic(err)
+	} 
 	/*peers := []string{
 		"95.158.11.9:33827",
 		"41.251.230.76:40385",
@@ -57,6 +75,18 @@ func main() {
 		"41.251.230.76:46441",
 		"41.251.230.76:40899",
 		"80.177.32.15:8999",
+	}*/
+	/*peers = []string {
+		"146.212.217.123:39732",
+		// "2.96.169.144:63814",
+		// "5.187.164.232:55123",
+		// "90.217.16.43:2501",
+	}*/
+	/*peers = []string {
+		"24.85.21.251:20409",
+		"51.183.27.64:6881",
+		"61.68.223.222:24479",
+		"73.5.152.51:49200",
 	}*/
 
 	peercloseChan := make(chan string)
@@ -73,6 +103,10 @@ func main() {
 			case peerAddr := <-peercloseChan:
 				fmt.Printf("Peer %s closed.\n", peerAddr)
 				delete(peerMap, peerAddr)
+				if len(peerMap) == 0 {
+					fmt.Printf("No active peers, exitting for now...")
+					return
+				}
 			case torrinfo := <-torrentinfoChan:
 				switch torrinfo {
 				case torrent.InfoCompleted:
@@ -83,6 +117,9 @@ func main() {
 				case torrent.InfoPieceComplete:
 					pieceindex := <-torrentinfoChan
 					fmt.Printf("Piece %d complete.\n", pieceindex)
+				case torrent.InfoFileComplete:
+					fileindex := <-torrentinfoChan
+					fmt.Printf("File %s complete.\n", mdata.FileOrder[fileindex])
 				}
 			}
 		}

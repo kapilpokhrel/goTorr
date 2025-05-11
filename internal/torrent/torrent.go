@@ -119,7 +119,9 @@ func NewTorrent(
 	return &currentTorrent, nil
 }
 
-func (currTorrent *Torrent) GetRarestPieceIndex(bitfield []byte) int {
+func (currTorrent *Torrent) GetRarestPieceIndex(bitfield []byte, peerAddr string) int {
+	currTorrent.mu.Lock()
+	defer currTorrent.mu.Unlock()
 	if currTorrent.Downloaded == currTorrent.TotalSize {
 		return InfoCompleted
 	}
@@ -134,7 +136,11 @@ func (currTorrent *Torrent) GetRarestPieceIndex(bitfield []byte) int {
 		}
 		if len(piece.requested) > 0 {
 			lastUncompletePiece = index
+			continue
 		}
+		currTorrent.pieces[index].requested = append(currTorrent.pieces[index].requested,
+			peerAddr,
+		)
 		return index
 	}
 
@@ -143,6 +149,8 @@ func (currTorrent *Torrent) GetRarestPieceIndex(bitfield []byte) int {
 }
 
 func (currTorrent *Torrent) GetRequiredBlocks(pieceindex int) (requiredBlocks [][2]uint32) {
+	currTorrent.mu.Lock()
+	defer currTorrent.mu.Unlock()
 	piecelength := min(
 		currTorrent.PieceLength,
 		currTorrent.TotalSize-currTorrent.PieceLength*uint64(pieceindex),
@@ -155,8 +163,8 @@ func (currTorrent *Torrent) GetRequiredBlocks(pieceindex int) (requiredBlocks []
 			requiredBlocks = append(requiredBlocks, [2]uint32{
 				uint32(int(currTorrent.BlockSize) * index),
 				uint32(min(
-					currTorrent.BlockSize,
-					uint16(piecelength-uint64(index)*uint64(currTorrent.BlockSize)),
+					uint64(currTorrent.BlockSize),
+					piecelength-uint64(index)*uint64(currTorrent.BlockSize),
 				)),
 			})
 		}

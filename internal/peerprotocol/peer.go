@@ -52,7 +52,7 @@ func NewPeer(currTorrent *torrent.Torrent, closeChan chan string) *Peer {
 }
 
 func (peer *Peer) Establish_Conn(ipport string, clientID []byte) (err error) {
-	conn, err := net.DialTimeout("tcp", ipport, 1*time.Minute)
+	conn, err := net.DialTimeout("tcp", ipport, 25*time.Second)
 	if err != nil {
 		return
 	}
@@ -85,7 +85,7 @@ func (peer *Peer) sendHandShake(clientID []byte) error {
 }
 
 func (peer *Peer) waitForHandShake() (err error) {
-	peer.conn.SetReadDeadline(time.Now().Add(2 * time.Minute)) // Timeout of 2 minutes
+	peer.conn.SetReadDeadline(time.Now().Add(25 * time.Second))
 	pstrlenBuf := make([]byte, 1)
 	_, err = io.ReadFull(peer.conn, pstrlenBuf)
 	if err != nil {
@@ -197,7 +197,9 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 			continue
 		}
 
-		index := peer.Torrent.GetRarestPieceIndex(peer.bitfield)
+		index := peer.Torrent.GetRarestPieceIndex(peer.bitfield,
+			peer.conn.RemoteAddr().String(),
+		)
 		if index >= 0 {
 			var err error
 			if peer.requested != 0 {
@@ -211,6 +213,7 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 				peer.mu.Unlock()
 				continue
 			} else {
+				fmt.Printf("Requesting piece %d from %s\n", index, peer.conn.RemoteAddr().String())
 				blocks_requested := 0
 				for _, block := range peer.Torrent.GetRequiredBlocks(index) {
 					request_message := request{
@@ -223,8 +226,11 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 						blocks_requested++
 					}
 				}
+				fmt.Printf("Requested %d blocks of piece %d from %s\n",
+					blocks_requested, index,
+					peer.conn.RemoteAddr().String(),
+				)
 				peer.requested = blocks_requested
-				// Send request
 			}
 			if err == nil {
 				peer.mu.Unlock()
@@ -268,9 +274,9 @@ func (peer *Peer) SendMessage(id uint8, buffer []byte) error {
 	buf.Write(buffer)
 
 	_, err := peer.conn.Write(buf.Bytes())
-	if err != nil {
+	if err == nil {
 		peer.lastMessageTime = time.Now()
+		//fmt.Printf("Sent id %d, data %v\n", id, buffer)
 	}
-	fmt.Printf("Sent id %d, data %v\n", id, buffer)
 	return err
 }

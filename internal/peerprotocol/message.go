@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"reflect"
 )
 
@@ -189,11 +188,11 @@ func (message *port) Send(peer *Peer) (err error)   { return nil }
 func MsgParse(buffer []byte) (msg message, err error) {
 	id := buffer[0]
 
-	endstr := ""
-	if len(buffer) > 15 {
-		endstr = "\b ...]"
-	}
-	fmt.Printf("Got id %d, Data: %v%s\n", id, buffer[1:min(len(buffer), 15)], endstr)
+	//endstr := ""
+	//if len(buffer) > 15 {
+	//	endstr = "\b ...]"
+	//}
+	//fmt.Printf("Got id %d, Data: %v%s\n", id, buffer[1:min(len(buffer), 15)], endstr)
 	msg = MessageFromID(id)
 	err = msg.Read(buffer[1:])
 	return
