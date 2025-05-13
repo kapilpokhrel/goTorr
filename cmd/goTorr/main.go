@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
+	"sync"
+
 	"goTorr/internal/client"
 	"goTorr/internal/metadata"
 	"goTorr/internal/peerprotocol"
 	"goTorr/internal/torrent"
 	"goTorr/internal/tracker"
-	"sync"
 )
 
 func check(e error) {
@@ -19,7 +20,6 @@ func check(e error) {
 func main() {
 	// Metadata .torrent parsing
 	var mdata metadata.Metadata
-	//err := mdata.GetMetadata("/mnt/exthome/dev_tmp/goTorr/cowboyBebop.torrent")
 	err := mdata.GetMetadata("/home/kapil/Downloads/mpeg7Shape1.torrent")
 	check(err)
 	err = mdata.Parse()
@@ -45,30 +45,22 @@ func main() {
 		panic(err)
 	}
 
-	//CLient
+	// CLient
 	client := client.NewClient()
-
-	// Announce
-	peers := make([]string, 0)
-	for _, url := range mdata.AnnounceUrls {
-		fmt.Printf("Announcing on %s\n", url)
-		plist, err := tracker.SendTrackerAnnounce(url, currtorrent, client.PeerID[:])
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			continue
-		}
-		peers = append(peers, plist...)
-		if len(peers) > 20 {
-			// We have got enough peers for us now
-			break
-		}
-	}
 
 	peercloseChan := make(chan string)
 	exitChan := make(chan int)
 	peerManager := peerprotocol.NewPeerManager(currtorrent, client.PeerID, peercloseChan)
-	var wg sync.WaitGroup
+	trackerManager := tracker.NewTrackerManager(
+		mdata.AnnounceUrls,
+		peerManager,
+		currtorrent,
+		client.PeerID,
+	)
+	// Announce
+	trackerManager.Start()
 
+	var wg sync.WaitGroup
 	infoListener := func() {
 		defer wg.Done()
 		for {
@@ -103,13 +95,7 @@ func main() {
 
 	wg.Add(1)
 	go infoListener()
-	go func() {
-		peerManager.AddPeers(peers)
-		if peerManager.Count() == 0 {
-			fmt.Println("No Peers found, exitting for now...")
-			exitChan <- 1
-		}
-	}()
+	go peerManager.Start()
 
 	wg.Wait()
 	peerManager.Clear()

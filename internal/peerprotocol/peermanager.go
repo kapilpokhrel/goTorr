@@ -9,37 +9,57 @@ import (
 )
 
 type PeerManager struct {
-	mu      sync.Mutex
-	peers   map[string]*Peer
-	torrent *torrent.Torrent
-	closeCh chan string
-	peerID  [20]byte
+	mu       sync.Mutex
+	peers    map[string]*Peer
+	peerList map[string]bool
+	torrent  *torrent.Torrent
+	closeCh  chan string
+	exitCh   chan bool
+	peerID   [20]byte
 }
 
 func NewPeerManager(t *torrent.Torrent, peerID [20]byte, closeCh chan string) *PeerManager {
 	return &PeerManager{
-		peers:   make(map[string]*Peer),
-		torrent: t,
-		closeCh: closeCh,
-		peerID:  peerID,
+		peers:    make(map[string]*Peer),
+		peerList: make(map[string]bool, 60),
+		torrent:  t,
+		closeCh:  closeCh,
+		peerID:   peerID,
+		exitCh:   make(chan bool),
 	}
 }
 
-func (pm *PeerManager) AddPeer(addr string) {
+func (pm *PeerManager) UpdatePeerList(peerList []string) {
+	for _, peerAddr := range peerList {
+		pm.mu.Lock()
+		_, exists := pm.peerList[peerAddr]
+		if !exists {
+			pm.peerList[peerAddr] = true
+		}
+		pm.mu.Unlock()
+	}
+}
+
+func (pm *PeerManager) PeerListCount() int {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return len(pm.peerList)
+}
+
+func (pm *PeerManager) addPeer(addr string) {
 	pm.mu.Lock()
 	if _, exists := pm.peers[addr]; exists {
 		pm.mu.Unlock()
 		return // Already connected
 	}
+	fmt.Printf("Adding peer %s\n", addr)
 	peer := NewPeer(pm.torrent, pm.closeCh)
 	pm.peers[addr] = peer
 	pm.mu.Unlock()
 
 	err := peer.Establish_Conn(addr, pm.peerID[:])
 	if err != nil {
-		pm.mu.Lock()
-		delete(pm.peers, addr)
-		pm.mu.Unlock()
+		pm.RemovePeer(addr)
 		fmt.Printf("Error adding %s: %v\n", addr, err)
 		return
 	}
@@ -53,18 +73,32 @@ func (pm *PeerManager) RemovePeer(addr string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	delete(pm.peers, addr)
+	delete(pm.peerList, addr)
+
 }
 
-func (pm *PeerManager) AddPeers(addrs []string) {
+func (pm *PeerManager) AddPeers() {
 	var wg sync.WaitGroup
-	for _, addr := range addrs {
+	added := 0
+	maxAdd := 30
+	for addr := range pm.peerList {
 		wg.Add(1)
 		go func(a string) {
 			defer wg.Done()
-			pm.AddPeer(a)
+			pm.mu.Lock()
+			pm.peerList[a] = true
+			pm.mu.Unlock()
+			pm.addPeer(a)
 		}(addr)
+		added++
+		if added == maxAdd {
+			wg.Wait()
+			if pm.Count() < maxAdd {
+				maxAdd -= added
+				added = 0
+			}
+		}
 	}
-	wg.Wait()
 }
 
 func (pm *PeerManager) Count() int {
@@ -80,4 +114,20 @@ func (pm *PeerManager) Clear() {
 		p.Close(nil)
 	}
 	clear(pm.peers)
+}
+
+func (pm *PeerManager) Start() {
+	pm.AddPeers()
+	ticker := time.NewTicker(1 * time.Minute)
+	for {
+		select {
+		case <-pm.exitCh:
+			return
+		case <-ticker.C:
+			if pm.Count() < 30 {
+				fmt.Printf("Active peers count = %d (< 30), trying to add new pair\n", pm.Count())
+				pm.AddPeers()
+			}
+		}
+	}
 }

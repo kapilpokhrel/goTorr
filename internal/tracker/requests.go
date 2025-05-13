@@ -18,13 +18,6 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 )
 
-type Tracker struct {
-	trackerId       string
-	interval        time.Duration
-	minInterval     time.Duration
-	lastRequestTime time.Time
-}
-
 type trackerResp struct {
 	interval    int
 	minInterval int
@@ -291,18 +284,16 @@ func SendHTTPTrackerAnnounce(
 	return parseHTTPAnnounceResp(respBytes)
 }
 
-func SendTrackerAnnounce(
+func (tracker *Tracker) SendTrackerAnnounce(
 	announce_url string,
 	torrent *torrent.Torrent,
 	peerID []byte,
 ) (peer []string, err error) {
-	var tracker Tracker
-	tracker, isin := trackerMap[announce_url]
-	if isin {
-		if time.Now().After(tracker.lastRequestTime.Add(tracker.interval)) {
-			return nil, errors.New("New request sooner than tracker's requested interval")
-		}
-	}
+	//if isin {
+	//	if time.Now().After(tracker.lastRequestTime.Add(tracker.interval)) {
+	//		return nil, errors.New("New request sooner than tracker's requested interval")
+	//	}
+	//}
 	var resp trackerResp
 	if strings.HasPrefix(announce_url, "http") {
 		resp, err = SendHTTPTrackerAnnounce(announce_url, torrent, peerID, tracker.trackerId)
@@ -317,12 +308,11 @@ func SendTrackerAnnounce(
 
 	interval, _ := time.ParseDuration(fmt.Sprintf("%ds", resp.interval))
 	minInterval, _ := time.ParseDuration(fmt.Sprintf("%ds", resp.minInterval))
-	trackerMap[announce_url] = Tracker{
-		resp.id,
-		interval,
-		minInterval,
-		time.Now(),
-	}
+
+	tracker.trackerId = resp.id
+	tracker.interval = interval
+	tracker.minInterval = minInterval
+	tracker.lastRequestTime = time.Now()
 	return resp.peersList, nil
 
 }
