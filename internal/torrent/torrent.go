@@ -1,6 +1,8 @@
 package torrent
 
 import (
+	b64 "encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -19,26 +21,90 @@ type Piece struct {
 	requested []string
 }
 
+func (p *Piece) MarshalJSON() ([]byte, error) {
+	type pieceAlias struct {
+		Completed bool
+		Blocks    []bool
+		Requested []string
+	}
+
+	alias := pieceAlias{
+		Completed: p.completed,
+		Blocks:    p.blocks,
+		Requested: p.requested,
+	}
+	b, err := json.Marshal(alias)
+	return b, err
+}
+
+func (p *Piece) UnmarshalJSON(inp []byte) error {
+	type pieceAlias struct {
+		Completed bool
+		Blocks    []bool
+		Requested []string
+	}
+
+	var alias pieceAlias
+	err := json.Unmarshal(inp, &alias)
+	if err != nil {
+		return nil
+	}
+	p.completed = alias.Completed
+	p.blocks = alias.Blocks
+	p.requested = alias.Requested
+	return err
+}
+
 type file struct {
 	size    int64
 	written int64
 	filep   *os.File
 }
 
+func (f *file) MarshalJSON() ([]byte, error) {
+	type fileAlias struct {
+		Size    int64
+		Written int64
+	}
+
+	alias := fileAlias{
+		Size:    f.size,
+		Written: f.written,
+	}
+	b, err := json.Marshal(alias)
+	return b, err
+}
+
+func (f *file) UnmarshalJSON(inp []byte) error {
+	type fileAlias struct {
+		Size    int64
+		Written int64
+	}
+
+	var alias fileAlias
+	err := json.Unmarshal(inp, &alias)
+	if err != nil {
+		return nil
+	}
+	f.size = alias.Size
+	f.written = alias.Written
+	return err
+}
+
 type Torrent struct {
-	mu              sync.Mutex
-	wg              sync.WaitGroup
+	mu              sync.Mutex     `json:"-"`
+	wg              sync.WaitGroup `json:"-"`
 	InfoHash        [20]byte
 	TotalSize       uint64
 	Downloaded      uint64
 	Uploaded        uint64
 	NoOfPieces      uint64
-	pieces          []*Piece
-	files           map[string]*file // file -> filesize
-	fileorder       []string
+	Pieces          []*Piece
+	Files           map[string]*file // file -> filesize
+	Fileorder       []string
 	BlockSize       uint16
 	PieceLength     uint64
-	torrentinfoChan chan int
+	torrentinfoChan chan int `json:"-"`
 }
 
 // TODO: Make torrent info private and write getter in torrent info.
@@ -70,6 +136,68 @@ func createFileWithDirectory(path string) (*os.File, error) {
 	return file, nil
 }
 
+func isSaved(infohash [20]byte) bool {
+	fname := fmt.Sprintf(
+		"%s.gotorr",
+		b64.StdEncoding.EncodeToString(infohash[:]),
+	)
+	if _, err := os.Stat(fname); os.IsNotExist(err) {
+		return false
+	} else {
+		return true
+	}
+}
+
+func (currTorrent *Torrent) save() error {
+	defer currTorrent.wg.Done()
+
+	fname := fmt.Sprintf(
+		"%s.gotorr",
+		b64.StdEncoding.EncodeToString(currTorrent.InfoHash[:]),
+	)
+
+	b, err := json.Marshal(currTorrent)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(fname, b, 0644)
+	return err
+}
+
+func (currTorrent *Torrent) load() error {
+	fname := fmt.Sprintf(
+		"%s.gotorr",
+		b64.StdEncoding.EncodeToString(currTorrent.InfoHash[:]),
+	)
+
+	b, err := os.ReadFile(fname)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, currTorrent)
+	if err != nil {
+		return err
+	}
+	for k := range currTorrent.Files {
+		filep, err := os.OpenFile(fname, os.O_APPEND, os.ModeAppend)
+		if err != nil {
+			return err
+		}
+		currTorrent.Files[k].filep = filep
+		// NOTE: We are supposed to close the file after it is completely written
+	}
+	return nil
+}
+
+func (currTorrent *Torrent) deleteSave() error {
+	fname := fmt.Sprintf(
+		"%s.gotorr",
+		b64.StdEncoding.EncodeToString(currTorrent.InfoHash[:]),
+	)
+	err := os.Remove(fname)
+	return err
+}
+
 func NewTorrent(
 	infohash [20]byte,
 	totalsize uint64,
@@ -84,15 +212,20 @@ func NewTorrent(
 		TotalSize:       totalsize,
 		Downloaded:      0,
 		Uploaded:        0,
-		pieces:          make([]*Piece, 0, noOfPieces),
-		files:           make(map[string]*file),
-		fileorder:       make([]string, len(fileorder)),
+		Pieces:          make([]*Piece, 0, noOfPieces),
+		Files:           make(map[string]*file),
+		Fileorder:       make([]string, len(fileorder)),
 		PieceLength:     piecelength,
 		BlockSize:       uint16(min(uint64(math.Pow(2, 14)), piecelength)), //Blocksize is 2^14
 		NoOfPieces:      uint64(noOfPieces),
 		torrentinfoChan: torrentinfoChan,
 	}
 
+	if isSaved(infohash) {
+		fmt.Println("Resuming from saved state...")
+		currentTorrent.load()
+		return &currentTorrent, nil
+	}
 	// files
 	for k, v := range files {
 		filep, err := createFileWithDirectory(k)
@@ -104,15 +237,15 @@ func NewTorrent(
 			return nil, err
 		}
 
-		currentTorrent.files[k] = &file{v, 0, filep}
+		currentTorrent.Files[k] = &file{v, 0, filep}
 		// NOTE: We are supposed to close the file after it is completely written
 	}
-	copy(currentTorrent.fileorder, fileorder)
+	copy(currentTorrent.Fileorder, fileorder)
 
 	// pieces
-	for i := 0; i < noOfPieces; i++ {
-		currentTorrent.pieces = append(
-			currentTorrent.pieces,
+	for i := range noOfPieces {
+		currentTorrent.Pieces = append(
+			currentTorrent.Pieces,
 			emptyPiece(min(piecelength, totalsize-piecelength*uint64(i)), currentTorrent.BlockSize),
 		)
 	}
@@ -127,7 +260,7 @@ func (currTorrent *Torrent) GetRarestPieceIndex(bitfield []byte, peerAddr string
 	}
 
 	lastUncompletePiece := InfoNoRequiredPieceInBitfield
-	for index, piece := range currTorrent.pieces {
+	for index, piece := range currTorrent.Pieces {
 		if piece.completed {
 			continue
 		}
@@ -138,7 +271,7 @@ func (currTorrent *Torrent) GetRarestPieceIndex(bitfield []byte, peerAddr string
 			lastUncompletePiece = index
 			continue
 		}
-		currTorrent.pieces[index].requested = append(currTorrent.pieces[index].requested,
+		currTorrent.Pieces[index].requested = append(currTorrent.Pieces[index].requested,
 			peerAddr,
 		)
 		return index
@@ -158,7 +291,7 @@ func (currTorrent *Torrent) GetRequiredBlocks(pieceindex int) (requiredBlocks []
 	noofBlocks := int(math.Ceil(float64(piecelength) / min(float64(currTorrent.BlockSize))))
 	requiredBlocks = make([][2]uint32, 0, noofBlocks)
 
-	for index, have := range currTorrent.pieces[pieceindex].blocks {
+	for index, have := range currTorrent.Pieces[pieceindex].blocks {
 		if !have {
 			requiredBlocks = append(requiredBlocks, [2]uint32{
 				uint32(int(currTorrent.BlockSize) * index),
@@ -175,11 +308,11 @@ func (currTorrent *Torrent) GetRequiredBlocks(pieceindex int) (requiredBlocks []
 func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 	blockIndex := uint64(begin) / uint64(currTorrent.BlockSize)
 	currTorrent.mu.Lock()
-	if currTorrent.pieces[index].blocks[blockIndex] {
+	if currTorrent.Pieces[index].blocks[blockIndex] {
 		currTorrent.mu.Unlock()
 		return
 	}
-	currTorrent.pieces[index].blocks[blockIndex] = true
+	currTorrent.Pieces[index].blocks[blockIndex] = true
 	currTorrent.Downloaded += uint64(len(piecedata))
 
 	currTorrent.mu.Unlock()
@@ -187,9 +320,11 @@ func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 	go currTorrent.writeBlocktoFile(index, begin, piecedata)
 
 	// Check if piece is complete
-	if all(currTorrent.pieces[index].blocks) {
-		currTorrent.pieces[index].completed = true
+	if all(currTorrent.Pieces[index].blocks) {
+		currTorrent.Pieces[index].completed = true
 
+		currTorrent.wg.Add(1)
+		go currTorrent.save()
 		currTorrent.mu.Lock()
 		currTorrent.torrentinfoChan <- InfoPieceComplete
 		currTorrent.torrentinfoChan <- int(index)
@@ -199,6 +334,8 @@ func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 	if currTorrent.Downloaded == currTorrent.TotalSize {
 		// Download Complete
 		currTorrent.wg.Wait()
+
+		currTorrent.deleteSave()
 		currTorrent.mu.Lock()
 		currTorrent.torrentinfoChan <- InfoCompleted
 		currTorrent.mu.Unlock()
@@ -232,8 +369,8 @@ func (currTorrent *Torrent) writeBlocktoFile(index, begin uint32, piecedata []by
 
 	dataoffset := int64(0)
 	remainingPiecedata := int64(len(piecedata))
-	for file_index, filepath := range currTorrent.fileorder {
-		file := currTorrent.files[filepath]
+	for file_index, filepath := range currTorrent.Fileorder {
+		file := currTorrent.Files[filepath]
 		if infileOffset >= file.size {
 			infileOffset -= file.size
 			continue
@@ -267,12 +404,13 @@ func (currTorrent *Torrent) writeBlocktoFile(index, begin uint32, piecedata []by
 		break
 
 	}
+
 	return
 }
 
 func (currTorrent *Torrent) Close() {
 	currTorrent.wg.Wait()
-	for _, v := range currTorrent.files {
+	for _, v := range currTorrent.Files {
 		v.filep.Close()
 	}
 	close(currTorrent.torrentinfoChan)

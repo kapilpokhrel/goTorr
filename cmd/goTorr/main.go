@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sync"
 
 	"goTorr/internal/client"
@@ -18,9 +19,13 @@ func check(e error) {
 }
 
 func main() {
+	args := os.Args
+	if len(args) <= 1 {
+		panic(fmt.Errorf("expected command line argument for torrent file to download"))
+	}
 	// Metadata .torrent parsing
 	var mdata metadata.Metadata
-	err := mdata.GetMetadata("/home/kapil/Downloads/mpeg7Shape1.torrent")
+	err := mdata.GetMetadata(args[1])
 	check(err)
 	err = mdata.Parse()
 	check(err)
