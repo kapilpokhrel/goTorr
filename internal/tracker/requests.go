@@ -127,7 +127,7 @@ func sendUDPAnnounce(
 
 	respAction := binary.BigEndian.Uint32(respBuf[:4])
 	resptID := respBuf[4:8]
-	if respAction != 0 {
+	if respAction != 1 {
 		return resp, fmt.Errorf("Incorrent action %d sent by tracker, expecting 0", respAction)
 	}
 	if !bytes.Equal(tID, resptID) {
@@ -137,7 +137,7 @@ func sendUDPAnnounce(
 	interval := binary.BigEndian.Uint32(respBuf[8:12])
 	seeders := binary.BigEndian.Uint32(respBuf[12:16])
 	leechers := binary.BigEndian.Uint32(respBuf[16:20])
-	peersList, err := parseBinaryPeers(respBuf[20:])
+	peersList, err := parseBinaryPeers(respBuf[20:n])
 	return trackerResp{
 		interval:    int(interval),
 		minInterval: int(interval),

@@ -30,14 +30,14 @@ func NewPeerManager(t *torrent.Torrent, peerID [20]byte, closeCh chan string) *P
 }
 
 func (pm *PeerManager) UpdatePeerList(peerList []string) {
+	pm.mu.Lock()
 	for _, peerAddr := range peerList {
-		pm.mu.Lock()
 		_, exists := pm.peerList[peerAddr]
 		if !exists {
 			pm.peerList[peerAddr] = true
 		}
-		pm.mu.Unlock()
 	}
+	pm.mu.Unlock()
 }
 
 func (pm *PeerManager) PeerListCount() int {
@@ -79,26 +79,32 @@ func (pm *PeerManager) RemovePeer(addr string) {
 
 func (pm *PeerManager) AddPeers() {
 	var wg sync.WaitGroup
-	added := 0
+
 	maxAdd := 30
+	semaphore := make(chan struct{}, maxAdd)
+
+	pm.mu.Lock()
+	// It is just simple to create another peerlist so we don't get
+	// concurrent iteration and writes
+	peerList := make([]string, 0, len(pm.peerList))
 	for addr := range pm.peerList {
+		peerList = append(peerList, addr)
+	}
+	pm.mu.Unlock()
+	for _, addr := range peerList {
 		wg.Add(1)
+		semaphore <- struct{}{}
 		go func(a string) {
 			defer wg.Done()
+			defer func() { <- semaphore }()
+
 			pm.mu.Lock()
 			pm.peerList[a] = true
 			pm.mu.Unlock()
 			pm.addPeer(a)
 		}(addr)
-		added++
-		if added == maxAdd {
-			wg.Wait()
-			if pm.Count() < maxAdd {
-				maxAdd -= added
-				added = 0
-			}
-		}
 	}
+	wg.Wait()
 }
 
 func (pm *PeerManager) Count() int {
