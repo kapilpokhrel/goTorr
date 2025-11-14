@@ -64,7 +64,7 @@ func (pm *PeerManager) addPeer(addr string) {
 		return
 	}
 
-	go peer.PeerChecker(time.Minute)
+	go peer.PeerChecker(1000 * time.Millisecond)
 	go peer.StartListening()
 	fmt.Printf("Peer %s added.\n", addr)
 }
@@ -74,7 +74,6 @@ func (pm *PeerManager) RemovePeer(addr string) {
 	defer pm.mu.Unlock()
 	delete(pm.peers, addr)
 	delete(pm.peerList, addr)
-
 }
 
 func (pm *PeerManager) AddPeers() {
@@ -96,7 +95,7 @@ func (pm *PeerManager) AddPeers() {
 		semaphore <- struct{}{}
 		go func(a string) {
 			defer wg.Done()
-			defer func() { <- semaphore }()
+			defer func() { <-semaphore }()
 
 			pm.mu.Lock()
 			pm.peerList[a] = true
@@ -117,6 +116,9 @@ func (pm *PeerManager) Clear() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	for _, p := range pm.peers {
+		if p.conn == nil {
+			continue
+		}
 		p.Close(nil)
 	}
 	clear(pm.peers)

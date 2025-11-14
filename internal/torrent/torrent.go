@@ -10,10 +10,12 @@ import (
 	"sync"
 )
 
-var InfoNoRequiredPieceInBitfield int = -1
-var InfoCompleted int = -2
-var InfoPieceComplete int = -3 // Followed by piece index
-var InfoFileComplete int = -4  // Followed by file index
+var (
+	InfoNoRequiredPieceInBitfield int = -1
+	InfoCompleted                 int = -2
+	InfoPieceComplete             int = -3 // Followed by piece index
+	InfoFileComplete              int = -4 // Followed by file index
+)
 
 type Piece struct {
 	completed bool
@@ -122,7 +124,7 @@ func createFileWithDirectory(path string) (*os.File, error) {
 	dir := filepath.Dir(path)
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err = os.MkdirAll(dir, 0755)
+		err = os.MkdirAll(dir, 0o755)
 		if err != nil {
 			return nil, fmt.Errorf("error creating directory: %w", err)
 		}
@@ -160,7 +162,7 @@ func (currTorrent *Torrent) save() error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(fname, b, 0644)
+	err = os.WriteFile(fname, b, 0o644)
 	return err
 }
 
@@ -216,7 +218,7 @@ func NewTorrent(
 		Files:           make(map[string]*file),
 		Fileorder:       make([]string, len(fileorder)),
 		PieceLength:     piecelength,
-		BlockSize:       uint16(min(uint64(math.Pow(2, 14)), piecelength)), //Blocksize is 2^14
+		BlockSize:       uint16(min(uint64(math.Pow(2, 14)), piecelength)), // Blocksize is 2^14
 		NoOfPieces:      uint64(noOfPieces),
 		torrentinfoChan: torrentinfoChan,
 	}

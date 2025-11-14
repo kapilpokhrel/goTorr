@@ -23,6 +23,7 @@ func main() {
 	if len(args) <= 1 {
 		panic(fmt.Errorf("expected command line argument for torrent file to download"))
 	}
+
 	// Metadata .torrent parsing
 	var mdata metadata.Metadata
 	err := mdata.GetMetadata(args[1])
@@ -104,5 +105,4 @@ func main() {
 
 	wg.Wait()
 	peerManager.Clear()
-	return
 }

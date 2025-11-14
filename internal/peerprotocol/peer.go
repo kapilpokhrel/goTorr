@@ -23,6 +23,7 @@ type state struct {
 
 type Peer struct {
 	mu                       sync.Mutex
+	addr                     string
 	conn                     net.Conn
 	id                       [20]byte
 	state                    state
@@ -57,6 +58,7 @@ func (peer *Peer) Establish_Conn(ipport string, clientID []byte) (err error) {
 		return
 	}
 	peer.conn = conn
+	peer.addr = peer.conn.RemoteAddr().String()
 
 	err = peer.sendHandShake(clientID)
 	if err != nil {
@@ -166,11 +168,7 @@ func (peer *Peer) StartListening() {
 			peer.Close(err)
 			return
 		}
-		err = peer_msg.Handle(peer)
-		if err != nil {
-			peer.Close(err)
-			return
-		}
+		go peer_msg.Handle(peer)
 		peer.lastNonKeepAliveResponse = time.Now()
 
 	}
@@ -190,21 +188,25 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 
 		peer.mu.Lock()
 
-		if peer.lastNonKeepAliveResponse.Add(5 * time.Minute).Before(time.Now()) {
+		if peer.lastNonKeepAliveResponse.Add(2 * time.Minute).Before(time.Now()) {
 			peer.Close(nil)
 			peer.mu.Unlock()
 			continue
 		}
 
+		if peer.requested > 30 {
+			peer.mu.Unlock()
+			continue
+		}
+
 		index := peer.Torrent.GetRarestPieceIndex(peer.bitfield,
-			peer.conn.RemoteAddr().String(),
+			peer.addr,
 		)
+
 		if index >= 0 {
 			var err error
-			if peer.requested != 0 {
-				peer.mu.Unlock()
-				continue
-			}
+
+			fmt.Println(index, peer.requested)
 			if !peer.state.am_intrested {
 				intrestedMessage := intrested{}
 				err = intrestedMessage.Send(peer)
@@ -212,7 +214,6 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 				peer.mu.Unlock()
 				continue
 			} else {
-				fmt.Printf("Requesting piece %d from %s\n", index, peer.conn.RemoteAddr().String())
 				blocks_requested := 0
 				for _, block := range peer.Torrent.GetRequiredBlocks(index) {
 					request_message := request{
@@ -223,13 +224,17 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 					err = request_message.Send(peer)
 					if err == nil {
 						blocks_requested++
+					} else {
+						fmt.Println(err)
 					}
 				}
-				fmt.Printf("Requested %d blocks of piece %d from %s\n",
-					blocks_requested, index,
-					peer.conn.RemoteAddr().String(),
-				)
-				peer.requested = blocks_requested
+				if blocks_requested > 0 {
+					//fmt.Printf("Requested %d blocks of piece %d from %s\n",
+					//	blocks_requested, index,
+					//  peer.addr,
+					//)
+					peer.requested += blocks_requested
+				}
 			}
 			if err == nil {
 				peer.mu.Unlock()
@@ -243,19 +248,23 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 			}
 		}
 		peer.mu.Unlock()
-		if peer.lastMessageTime.Add(2 * time.Minute).Before(time.Now()) {
+		if peer.lastMessageTime.Add(2 * time.Second).Before(time.Now()) {
 			peer.SendKeepAlive()
 		}
 	}
 }
 
 func (peer *Peer) Close(err error) {
-	if !errors.Is(err, net.ErrClosed) {
-		defer peer.conn.Close()
+	fmt.Printf("Closing peer, %v, error = %v\n", peer.addr, err)
+	if peer.conn != nil {
+		err := peer.conn.Close()
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			fmt.Printf("Error in closing peer %v, %v\n", peer.addr, err)
+		}
 	}
 	peer.stopPeer <- true
 	select {
-	case peer.closeChan <- peer.conn.RemoteAddr().String():
+	case peer.closeChan <- peer.addr:
 	default:
 	}
 }
@@ -277,7 +286,6 @@ func (peer *Peer) SendMessage(id uint8, buffer []byte) error {
 	_, err := peer.conn.Write(buf.Bytes())
 	if err == nil {
 		peer.lastMessageTime = time.Now()
-		// fmt.Printf("Sent id %d, data %v\n", id, buffer)
 	}
 	return err
 }

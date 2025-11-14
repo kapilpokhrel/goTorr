@@ -46,6 +46,7 @@ func (message *intrested) Handle(peer *Peer) (err error) {
 	peer.mu.Unlock()
 	return nil
 }
+
 func (message *intrested) Send(peer *Peer) error {
 	err := peer.SendMessage(IDFromMessage(message), make([]byte, 0))
 	if err == nil {
@@ -98,6 +99,7 @@ func (message *bitfield) Read(buffer []byte) (err error) {
 	copy(message.bitfield, buffer)
 	return nil
 }
+
 func (message *bitfield) Handle(peer *Peer) (err error) {
 	peer.mu.Lock()
 	peer.bitfield = make([]byte, len(message.bitfield))
@@ -106,6 +108,7 @@ func (message *bitfield) Handle(peer *Peer) (err error) {
 	peer.signalPeerChecker <- true
 	return nil
 }
+
 func (message *bitfield) Send(peer *Peer) (err error) {
 	return peer.SendMessage(IDFromMessage(message), message.bitfield)
 }
@@ -134,7 +137,6 @@ func (message *request) Send(peer *Peer) (err error) {
 	binary.BigEndian.PutUint32(lenBuf, message.length)
 	buf.Write(lenBuf)
 	return peer.SendMessage(IDFromMessage(message), buf.Bytes())
-
 }
 
 type piece struct {
@@ -149,6 +151,7 @@ func (message *piece) Read(buffer []byte) (err error) {
 	message.block = buffer[8:]
 	return nil
 }
+
 func (message *piece) Handle(peer *Peer) (err error) {
 	peer.Torrent.WriteBlock(message.index, message.begin, message.block)
 	peer.mu.Lock()
