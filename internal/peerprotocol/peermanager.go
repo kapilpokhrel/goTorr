@@ -10,25 +10,27 @@ import (
 )
 
 type PeerManager struct {
-	mu          sync.Mutex
-	peers       map[string]*Peer
-	activePeers map[string]bool
-	peerList    map[string]bool
-	torrent     *torrent.Torrent
-	closeCh     chan string
-	exitCh      chan bool
-	peerID      [20]byte
+	mu               sync.Mutex
+	peers            map[string]*Peer
+	activePeers      map[string]bool
+	peerList         map[string]bool
+	torrent          *torrent.Torrent
+	closeCh          chan string
+	exitCh           chan bool
+	peerListUpdateCh chan bool
+	peerID           [20]byte
 }
 
 func NewPeerManager(t *torrent.Torrent, peerID [20]byte, closeCh chan string) *PeerManager {
 	return &PeerManager{
-		peers:       make(map[string]*Peer),
-		peerList:    make(map[string]bool, 60),
-		activePeers: make(map[string]bool),
-		torrent:     t,
-		closeCh:     closeCh,
-		peerID:      peerID,
-		exitCh:      make(chan bool),
+		peers:            make(map[string]*Peer),
+		peerList:         make(map[string]bool, 60),
+		activePeers:      make(map[string]bool),
+		torrent:          t,
+		closeCh:          closeCh,
+		peerID:           peerID,
+		exitCh:           make(chan bool),
+		peerListUpdateCh: make(chan bool),
 	}
 }
 
@@ -40,6 +42,7 @@ func (pm *PeerManager) UpdatePeerList(peerList []string) {
 			pm.peerList[peerAddr] = true
 		}
 	}
+	pm.peerListUpdateCh <- true
 	pm.mu.Unlock()
 }
 
@@ -92,6 +95,9 @@ func (pm *PeerManager) AddPeers() {
 	// concurrent iteration and writes
 	peerList := make([]string, 0, len(pm.peerList))
 	for addr := range pm.peerList {
+		if _, exists := pm.peers[addr]; exists {
+			continue
+		}
 		peerList = append(peerList, addr)
 	}
 	pm.mu.Unlock()
@@ -137,16 +143,18 @@ func (pm *PeerManager) Clear() {
 
 func (pm *PeerManager) Start() {
 	pm.AddPeers()
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(2 * time.Minute)
 	for {
 		select {
+		case <-pm.peerListUpdateCh:
+		case <-ticker.C:
 		case <-pm.exitCh:
 			return
-		case <-ticker.C:
-			if pm.Count() < 30 {
-				slog.Info(fmt.Sprintf("Active peers count = %d (< 30), trying to add new peers\n", pm.Count()))
-				pm.AddPeers()
-			}
 		}
+		if pm.ActiveCount() < 15 {
+			slog.Info(fmt.Sprintf("Active peers count = %d (< 15), trying to add new peers\n", pm.ActiveCount()))
+			pm.AddPeers()
+		}
+
 	}
 }

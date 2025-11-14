@@ -23,7 +23,7 @@ func check(e error) {
 }
 
 func setupLogger() {
-	stdHandler := tint.NewHandler(os.Stdout, &tint.Options{Level: slog.LevelDebug})
+	stdHandler := tint.NewHandler(os.Stdout, &tint.Options{Level: slog.LevelInfo})
 	logger := slog.New(stdHandler)
 	slog.SetDefault(logger)
 }
@@ -74,7 +74,7 @@ func main() {
 		client.PeerID,
 	)
 	// Announce
-	trackerManager.Start()
+	go trackerManager.Start()
 
 	var wg sync.WaitGroup
 

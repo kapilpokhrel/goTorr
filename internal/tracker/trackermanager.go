@@ -3,7 +3,7 @@ package tracker
 import (
 	"fmt"
 	"log/slog"
-	"time"
+	"sync"
 
 	"goTorr/internal/torrent"
 )
@@ -14,14 +14,8 @@ type peerManager interface {
 	PeerListCount() int
 }
 
-type Tracker struct {
-	trackerID       string
-	interval        time.Duration
-	minInterval     time.Duration
-	lastRequestTime time.Time
-}
-
 type TrackerManager struct {
+	mu            sync.Mutex
 	announceURLS  []string
 	activeTracker map[string]*Tracker
 	currTorrent   *torrent.Torrent
@@ -46,7 +40,6 @@ func NewTrackerManager(
 }
 
 func (tm *TrackerManager) Start() {
-	peers := make([]string, 0)
 	for _, url := range tm.announceURLS {
 		_, exits := tm.activeTracker[url]
 		if exits {
@@ -55,19 +48,29 @@ func (tm *TrackerManager) Start() {
 
 		slog.Debug(fmt.Sprintf("Announcing on %s\n", url))
 		tracker := new(Tracker)
-		plist, err := tracker.SendTrackerAnnounce(url, tm.currTorrent, tm.peerID[:])
+		tracker.url = url
+		plist, err := tracker.SendTrackerAnnounce(tm.currTorrent, tm.peerID[:])
 		if err != nil {
 			slog.Debug(fmt.Sprintf("Announce failed on %s, error = %v", url, err))
 			continue
 		}
+		tm.mu.Lock()
 		tm.activeTracker[url] = tracker
-		peers = append(peers, plist...)
-		if len(peers) > 55 {
-			break
-		}
+		tm.mu.Unlock()
+
+		go tracker.startPeriodicUpdate(tracker.interval, tm.currTorrent, tm.peerID[:], tm.pm)
+		slog.Debug(fmt.Sprintf("Started periodic announce for %s in interval %v", url, tracker.interval))
+		tm.pm.UpdatePeerList(plist)
 	}
-	tm.pm.UpdatePeerList(peers)
 }
 
-// TODO: Add tickers in each tracker for regular tracker Update
+func (tm *TrackerManager) Stop() {
+	for url, tracker := range tm.activeTracker {
+		tm.mu.Lock()
+		tracker.stopTracker <- true
+		delete(tm.activeTracker, url)
+		tm.mu.Unlock()
+	}
+}
+
 // Need to add force tracker request when peerListCount drops low than some threshold

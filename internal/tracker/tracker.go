@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
@@ -18,6 +19,15 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 )
+
+type Tracker struct {
+	url             string
+	trackerID       string
+	interval        time.Duration
+	minInterval     time.Duration
+	lastRequestTime time.Time
+	stopTracker     chan bool
+}
 
 type trackerResp struct {
 	interval    int
@@ -283,10 +293,10 @@ func SendHTTPTrackerAnnounce(
 }
 
 func (tracker *Tracker) SendTrackerAnnounce(
-	announceURL string,
 	torrent *torrent.Torrent,
 	peerID []byte,
 ) (peer []string, err error) {
+	announceURL := tracker.url
 	var resp trackerResp
 	if strings.HasPrefix(announceURL, "http") {
 		resp, err = SendHTTPTrackerAnnounce(announceURL, torrent, peerID, tracker.trackerID)
@@ -307,4 +317,29 @@ func (tracker *Tracker) SendTrackerAnnounce(
 	tracker.minInterval = minInterval
 	tracker.lastRequestTime = time.Now()
 	return resp.peersList, nil
+}
+
+func (tracker *Tracker) startPeriodicUpdate(
+	interval time.Duration,
+	torrent *torrent.Torrent,
+	peerID []byte,
+	pm peerManager,
+) (peer []string, err error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+		case <-tracker.stopTracker:
+			return
+		}
+		slog.Info(fmt.Sprintf("Sending Update to %s", tracker.url))
+		plist, err := tracker.SendTrackerAnnounce(torrent, peerID)
+		if err != nil {
+			slog.Debug(fmt.Sprintf("Announce failed on %s, error = %v", tracker.url, err))
+			continue
+		}
+		pm.UpdatePeerList(plist)
+	}
 }
