@@ -6,6 +6,7 @@ require (
 	github.com/anacrolix/torrent v1.58.1
 	github.com/davecgh/go-spew v1.1.1
 	github.com/google/uuid v1.6.0
+	github.com/lmittmann/tint v1.1.2
 )
 
 require (

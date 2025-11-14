@@ -12,7 +12,7 @@ import (
 )
 
 type Metadata struct {
-	raw          map[string]interface{}
+	raw          map[string]any
 	TotalSize    uint64
 	Files        map[string]int64
 	FileOrder    []string
@@ -32,23 +32,23 @@ func (m *Metadata) GetMetadata(filepath string) (err error) {
 
 func (m *Metadata) GetInfoHash() (infohash [20]byte, err error) {
 	if m.raw == nil {
-		err = errors.New("Metadat empty")
+		err = errors.New("metadat empty")
 		return
 	}
-	bencoded_info, err := bencode.Marshal(m.raw["info"])
+	bencodedInfo, err := bencode.Marshal(m.raw["info"])
 	if err != nil {
 		return
 	}
-	return sha1.Sum(bencoded_info), nil
-
+	return sha1.Sum(bencodedInfo), nil
 }
+
 func (m *Metadata) Parse() error {
 	if m.raw == nil {
-		return errors.New("Metadata dict empty.")
+		return errors.New("metadata dict empty")
 	}
 	info, in := m.raw["info"]
 	if in {
-		info := info.(map[string]interface{})
+		info := info.(map[string]any)
 
 		// Piece Length
 		m.PieceLength = info["piece length"].(int64)
@@ -58,7 +58,7 @@ func (m *Metadata) Parse() error {
 
 		// Files
 		m.Files = make(map[string]int64)
-		name, _ := info["name"]
+		name := info["name"]
 
 		length, in := info["length"]
 		if in {
@@ -68,14 +68,14 @@ func (m *Metadata) Parse() error {
 			m.FileOrder = []string{name.(string)}
 		} else {
 			// Multifile mode
-			m.FileOrder = make([]string, 0, len(info["files"].([]interface{})))
-			for _, file := range info["files"].([]interface{}) {
-				file, _ := file.(map[string]interface{})
+			m.FileOrder = make([]string, 0, len(info["files"].([]any)))
+			for _, file := range info["files"].([]any) {
+				file, _ := file.(map[string]any)
 
-				// Converting path list of interface{} to path list of string
-				paths := make([]string, len(file["path"].([]interface{})))
+				// Converting path list of any to path list of string
+				paths := make([]string, len(file["path"].([]any)))
 				paths = append(paths, name.(string))
-				for _, value := range file["path"].([]interface{}) {
+				for _, value := range file["path"].([]any) {
 					paths = append(paths, value.(string))
 				}
 				m.Files[filepath.Join(paths...)] = file["length"].(int64)
@@ -90,10 +90,7 @@ func (m *Metadata) Parse() error {
 		// byte string of concatination of all 20 bytes SHA1 hash value of pieces
 		pieces := info["pieces"].(string)
 		for i := 0; i < len(pieces); i += 20 {
-			end := i + 20
-			if end > len(pieces) {
-				end = len(pieces)
-			}
+			end := min(i+20, len(pieces))
 			m.Pieces[i/20] = []byte(pieces[i:end])
 		}
 
@@ -104,10 +101,10 @@ func (m *Metadata) Parse() error {
 	if in {
 		m.AnnounceUrls = append(m.AnnounceUrls, announce.(string))
 	}
-	announce_list, in := m.raw["announce-list"]
+	announceList, in := m.raw["announce-list"]
 	if in {
-		for _, urlList := range announce_list.([]interface{}) {
-			for _, url := range urlList.([]interface{}) {
+		for _, urlList := range announceList.([]any) {
+			for _, url := range urlList.([]any) {
 				m.AnnounceUrls = append(m.AnnounceUrls, url.(string))
 			}
 		}
@@ -121,6 +118,4 @@ func (m *Metadata) Print() {
 	spew.Printf("Piece Length: %v\n", m.PieceLength)
 	spew.Printf("Files:\n")
 	spew.Dump(m.Files)
-	spew.Printf("AnnounceUrls:\n")
-	spew.Dump(m.AnnounceUrls)
 }

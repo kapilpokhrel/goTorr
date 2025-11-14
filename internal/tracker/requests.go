@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"goTorr/internal/torrent"
 	"io"
 	"math/rand"
 	"net"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goTorr/internal/torrent"
 
 	"github.com/anacrolix/torrent/bencode"
 )
@@ -27,11 +28,9 @@ type trackerResp struct {
 	peersList   []string
 }
 
-var trackerMap = make(map[string]Tracker)
-
 func parseBinaryPeers(peersBytes []byte) ([]string, error) {
 	if len(peersBytes)%6 != 0 {
-		return nil, errors.New("Binary Model of peers list must be a multiple of 6")
+		return nil, errors.New("binary Model of peers list must be a multiple of 6")
 	}
 	peersList := make([]string, 0, len(peersBytes)/6) // Tracker default to 50 peers
 	for i := 0; i < len(peersBytes); i += 6 {
@@ -58,7 +57,7 @@ func sendUDPConnect(conn *net.UDPConn, tID []byte) (connID []byte, err error) {
 	// Connect Request
 	reqBuf := make([]byte, 0, 16)
 	reqBuf = binary.BigEndian.AppendUint64(reqBuf, uint64(0x41727101980))
-	reqBuf = binary.BigEndian.AppendUint32(reqBuf, 0) //action = 0
+	reqBuf = binary.BigEndian.AppendUint32(reqBuf, 0) // action = 0
 	reqBuf = append(reqBuf, tID...)
 	conn.Write(reqBuf)
 
@@ -66,24 +65,23 @@ func sendUDPConnect(conn *net.UDPConn, tID []byte) (connID []byte, err error) {
 	conn.SetReadDeadline(time.Now().Add(25 * time.Second))
 	respBuf := make([]byte, 16)
 	n, _, err := conn.ReadFromUDP(respBuf)
-	conn.SetReadDeadline(time.Time{}) //reset timeout
+	conn.SetReadDeadline(time.Time{}) // reset timeout
 	if err != nil {
 		return nil, err
 	}
 	if n < 16 {
-		return nil, errors.New("Incorrent connect response from the tracker")
+		return nil, errors.New("incorrent connect response from the tracker")
 	}
 	respAction := binary.BigEndian.Uint32(respBuf[:4])
 	resptID := respBuf[4:8]
 	connID = respBuf[8:]
 	if respAction != 0 {
-		return nil, fmt.Errorf("Incorrent action %d sent by tracker, expecting 0", respAction)
+		return nil, fmt.Errorf("incorrent action %d sent by tracker, expecting 0", respAction)
 	}
 	if !bytes.Equal(tID, resptID) {
-		return nil, fmt.Errorf("Different transactionID used by tracker")
+		return nil, fmt.Errorf("different transactionID used by tracker")
 	}
 	return connID, nil
-
 }
 
 func sendUDPAnnounce(
@@ -91,11 +89,11 @@ func sendUDPAnnounce(
 	tID []byte,
 	connID []byte,
 	torrent *torrent.Torrent,
-	peerID []byte) (resp trackerResp, err error) {
-
+	peerID []byte,
+) (resp trackerResp, err error) {
 	announceBuf := make([]byte, 0, 98)
 	announceBuf = append(announceBuf, connID...)
-	announceBuf = binary.BigEndian.AppendUint32(announceBuf, 1) //action
+	announceBuf = binary.BigEndian.AppendUint32(announceBuf, 1) // action
 	announceBuf = append(announceBuf, tID...)
 	announceBuf = append(announceBuf, torrent.InfoHash[:]...)
 	announceBuf = append(announceBuf, peerID...)
@@ -108,7 +106,7 @@ func sendUDPAnnounce(
 	announceBuf = binary.BigEndian.AppendUint32(announceBuf, 50)            // numwant
 	announceBuf = binary.BigEndian.AppendUint16(announceBuf, 6869)          // Port
 
-	n, err := conn.Write(announceBuf)
+	_, err = conn.Write(announceBuf)
 	if err != nil {
 		return resp, err
 	}
@@ -116,28 +114,31 @@ func sendUDPAnnounce(
 	// Announce Response
 	conn.SetReadDeadline(time.Now().Add(25 * time.Second))
 	respBuf := make([]byte, 1500)
-	n, _, err = conn.ReadFromUDP(respBuf)
+	n, _, err := conn.ReadFromUDP(respBuf)
 	if err != nil {
 		return resp, err
 	}
 
 	if n < 20 {
-		return resp, fmt.Errorf("Announe Response too short")
+		return resp, fmt.Errorf("announe Response too short")
 	}
 
 	respAction := binary.BigEndian.Uint32(respBuf[:4])
 	resptID := respBuf[4:8]
 	if respAction != 1 {
-		return resp, fmt.Errorf("Incorrent action %d sent by tracker, expecting 0", respAction)
+		return resp, fmt.Errorf("incorrent action %d sent by tracker, expecting 0", respAction)
 	}
 	if !bytes.Equal(tID, resptID) {
-		return resp, fmt.Errorf("Different transactionID used by tracker")
+		return resp, fmt.Errorf("different transactionID used by tracker")
 	}
 
 	interval := binary.BigEndian.Uint32(respBuf[8:12])
 	seeders := binary.BigEndian.Uint32(respBuf[12:16])
 	leechers := binary.BigEndian.Uint32(respBuf[16:20])
 	peersList, err := parseBinaryPeers(respBuf[20:n])
+	if err != nil {
+		return resp, fmt.Errorf("peer parsing failed, %v", err)
+	}
 	return trackerResp{
 		interval:    int(interval),
 		minInterval: int(interval),
@@ -145,19 +146,17 @@ func sendUDPAnnounce(
 		leechers:    int(leechers),
 		peersList:   peersList,
 	}, nil
-
 }
 
 func SendUDPTrackerAnnounce(
-	announce_url string,
+	announceURL string,
 	torrent *torrent.Torrent,
 	peerID []byte,
 ) (resp trackerResp, err error) {
-
 	tID := make([]byte, 4)
 	binary.BigEndian.PutUint32(tID, rand.Uint32())
 
-	hostport, _ := strings.CutPrefix(announce_url, "udp://")
+	hostport, _ := strings.CutPrefix(announceURL, "udp://")
 	hostport, _ = strings.CutSuffix(hostport, "/announce")
 	raddr, err := net.ResolveUDPAddr("udp", hostport)
 	if err != nil {
@@ -178,38 +177,37 @@ func SendUDPTrackerAnnounce(
 }
 
 func parseHTTPAnnounceResp(httpResp []byte) (parsedResp trackerResp, err error) {
-
 	respMap := make(map[string]any)
 	err = bencode.Unmarshal(httpResp, &respMap)
 	if err != nil {
 		return
 	}
 
-	failure_reason, isin := respMap["failure reason"]
-	if isin {
-		err = errors.New(failure_reason.(string))
+	failureReason, isIn := respMap["failure reason"]
+	if isIn {
+		err = errors.New(failureReason.(string))
 		return
 	}
 
 	trackerid := ""
-	_, isin = respMap["tracker id"]
-	if isin {
+	_, isIn = respMap["tracker id"]
+	if isIn {
 		trackerid = respMap["tracker id"].(string)
 	}
 	interval := respMap["interval"].(int64)
 	minInterval := interval
-	respMinInterval, isin := respMap["min interval"]
-	if isin {
+	respMinInterval, isIn := respMap["min interval"]
+	if isIn {
 		minInterval = respMinInterval.(int64)
 	}
 	seeders := int64(-1)
 	leechers := int64(-1)
-	_, isin = respMap["complete"]
-	if isin {
+	_, isIn = respMap["complete"]
+	if isIn {
 		seeders = respMap["complete"].(int64)
 	}
-	_, isin = respMap["incomplete"]
-	if isin {
+	_, isIn = respMap["incomplete"]
+	if isIn {
 		seeders = respMap["incomplete"].(int64)
 	}
 
@@ -227,16 +225,15 @@ func parseHTTPAnnounceResp(httpResp []byte) (parsedResp trackerResp, err error) 
 		int(leechers),
 		peersList,
 	}, nil
-
 }
+
 func SendHTTPTrackerAnnounce(
-	announce_url string,
+	announceURL string,
 	torrent *torrent.Torrent,
 	peerID []byte,
 	trackerID string,
 ) (resp trackerResp, err error) {
-
-	u, err := url.Parse(announce_url)
+	u, err := url.Parse(announceURL)
 	if err != nil {
 		return
 	}
@@ -250,9 +247,10 @@ func SendHTTPTrackerAnnounce(
 	// query.Add("compact", "1")
 	query.Add("no_peer_id", "1")
 
-	if torrent.Downloaded == 0 {
+	switch torrent.Downloaded {
+	case 0:
 		query.Add("event", "started")
-	} else if torrent.Downloaded == torrent.TotalSize {
+	case torrent.TotalSize:
 		query.Add("event", "completed")
 	}
 
@@ -285,22 +283,17 @@ func SendHTTPTrackerAnnounce(
 }
 
 func (tracker *Tracker) SendTrackerAnnounce(
-	announce_url string,
+	announceURL string,
 	torrent *torrent.Torrent,
 	peerID []byte,
 ) (peer []string, err error) {
-	//if isin {
-	//	if time.Now().After(tracker.lastRequestTime.Add(tracker.interval)) {
-	//		return nil, errors.New("New request sooner than tracker's requested interval")
-	//	}
-	//}
 	var resp trackerResp
-	if strings.HasPrefix(announce_url, "http") {
-		resp, err = SendHTTPTrackerAnnounce(announce_url, torrent, peerID, tracker.trackerId)
-	} else if strings.HasPrefix(announce_url, "udp") {
-		resp, err = SendUDPTrackerAnnounce(announce_url, torrent, peerID)
+	if strings.HasPrefix(announceURL, "http") {
+		resp, err = SendHTTPTrackerAnnounce(announceURL, torrent, peerID, tracker.trackerID)
+	} else if strings.HasPrefix(announceURL, "udp") {
+		resp, err = SendUDPTrackerAnnounce(announceURL, torrent, peerID)
 	} else {
-		return nil, fmt.Errorf("Unrecognized announce url, %s", announce_url)
+		return nil, fmt.Errorf("unrecognized announce url, %s", announceURL)
 	}
 	if err != nil {
 		return nil, err
@@ -309,10 +302,9 @@ func (tracker *Tracker) SendTrackerAnnounce(
 	interval, _ := time.ParseDuration(fmt.Sprintf("%ds", resp.interval))
 	minInterval, _ := time.ParseDuration(fmt.Sprintf("%ds", resp.minInterval))
 
-	tracker.trackerId = resp.id
+	tracker.trackerID = resp.id
 	tracker.interval = interval
 	tracker.minInterval = minInterval
 	tracker.lastRequestTime = time.Now()
 	return resp.peersList, nil
-
 }

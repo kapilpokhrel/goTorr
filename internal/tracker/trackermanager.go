@@ -2,8 +2,10 @@ package tracker
 
 import (
 	"fmt"
-	"goTorr/internal/torrent"
+	"log/slog"
 	"time"
+
+	"goTorr/internal/torrent"
 )
 
 type peerManager interface {
@@ -13,7 +15,7 @@ type peerManager interface {
 }
 
 type Tracker struct {
-	trackerId       string
+	trackerID       string
 	interval        time.Duration
 	minInterval     time.Duration
 	lastRequestTime time.Time
@@ -51,17 +53,16 @@ func (tm *TrackerManager) Start() {
 			continue
 		}
 
-		fmt.Printf("Announcing on %s\n", url)
+		slog.Debug(fmt.Sprintf("Announcing on %s\n", url))
 		tracker := new(Tracker)
 		plist, err := tracker.SendTrackerAnnounce(url, tm.currTorrent, tm.peerID[:])
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			slog.Debug(fmt.Sprintf("Announce failed on %s, error = %v", url, err))
 			continue
 		}
 		tm.activeTracker[url] = tracker
 		peers = append(peers, plist...)
 		if len(peers) > 55 {
-			// We have got enough peers for us now
 			break
 		}
 	}

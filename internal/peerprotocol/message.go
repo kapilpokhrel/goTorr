@@ -18,8 +18,8 @@ type choke struct{}
 func (message *choke) Read(buffer []byte) (err error) { return nil }
 func (message *choke) Handle(peer *Peer) (err error) {
 	peer.mu.Lock()
-	peer.state.am_intrested = false
-	peer.state.peer_chocking = true
+	peer.state.amIntrested = false
+	peer.state.peerChoking = true
 	peer.mu.Unlock()
 	return nil
 }
@@ -30,7 +30,7 @@ type unchoke struct{}
 func (message *unchoke) Read(buffer []byte) (err error) { return nil }
 func (message *unchoke) Handle(peer *Peer) (err error) {
 	peer.mu.Lock()
-	peer.state.peer_chocking = false
+	peer.state.peerChoking = false
 	peer.mu.Unlock()
 	peer.signalPeerChecker <- true
 	return nil
@@ -42,7 +42,7 @@ type intrested struct{}
 func (message *intrested) Read(buffer []byte) (err error) { return nil }
 func (message *intrested) Handle(peer *Peer) (err error) {
 	peer.mu.Lock()
-	peer.state.peer_intrested = true
+	peer.state.peerIntrested = true
 	peer.mu.Unlock()
 	return nil
 }
@@ -50,7 +50,7 @@ func (message *intrested) Handle(peer *Peer) (err error) {
 func (message *intrested) Send(peer *Peer) error {
 	err := peer.SendMessage(IDFromMessage(message), make([]byte, 0))
 	if err == nil {
-		peer.state.am_intrested = true
+		peer.state.amIntrested = true
 	}
 	return err
 }
@@ -60,7 +60,7 @@ type Uninstrested struct{}
 func (message *Uninstrested) Read(buffer []byte) (err error) { return nil }
 func (message *Uninstrested) Handle(peer *Peer) (err error) {
 	peer.mu.Lock()
-	peer.state.peer_intrested = false
+	peer.state.peerIntrested = false
 	peer.mu.Unlock()
 	return nil
 }
@@ -178,11 +178,11 @@ func (message *cancel) Handle(peer *Peer) (err error) { return nil }
 func (message *cancel) Send(peer *Peer) (err error)   { return nil }
 
 type port struct {
-	listen_port uint16
+	listenPort uint16
 }
 
 func (message *port) Read(buffer []byte) (err error) {
-	message.listen_port = binary.BigEndian.Uint16(buffer)
+	message.listenPort = binary.BigEndian.Uint16(buffer)
 	return nil
 }
 func (message *port) Handle(peer *Peer) (err error) { return nil }
@@ -191,11 +191,6 @@ func (message *port) Send(peer *Peer) (err error)   { return nil }
 func MsgParse(buffer []byte) (msg message, err error) {
 	id := buffer[0]
 
-	//endstr := ""
-	//if len(buffer) > 15 {
-	//	endstr = "\b ...]"
-	//}
-	//fmt.Printf("Got id %d, Data: %v%s\n", id, buffer[1:min(len(buffer), 15)], endstr)
 	msg = MessageFromID(id)
 	err = msg.Read(buffer[1:])
 	return

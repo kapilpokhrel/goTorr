@@ -1,3 +1,4 @@
+// Package peerprotocol handler management of active peers, communication with peer and messae parsing
 package peerprotocol
 
 import (
@@ -6,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"sync"
@@ -15,10 +17,10 @@ import (
 )
 
 type state struct {
-	am_chocking    bool
-	am_intrested   bool
-	peer_chocking  bool
-	peer_intrested bool
+	amChoking     bool
+	amIntrested   bool
+	peerChoking   bool
+	peerIntrested bool
 }
 
 type Peer struct {
@@ -52,7 +54,7 @@ func NewPeer(currTorrent *torrent.Torrent, closeChan chan string) *Peer {
 	return peer
 }
 
-func (peer *Peer) Establish_Conn(ipport string, clientID []byte) (err error) {
+func (peer *Peer) EstablishConn(ipport string, clientID []byte) (err error) {
 	conn, err := net.DialTimeout("tcp", ipport, 25*time.Second)
 	if err != nil {
 		return
@@ -63,12 +65,12 @@ func (peer *Peer) Establish_Conn(ipport string, clientID []byte) (err error) {
 	err = peer.sendHandShake(clientID)
 	if err != nil {
 		defer peer.conn.Close()
-		return fmt.Errorf("Handshake Error: %w", err)
+		return fmt.Errorf("handshake Error: %w", err)
 	}
 	err = peer.waitForHandShake()
 	if err != nil {
 		defer peer.conn.Close()
-		return fmt.Errorf("Handshake Error: %w", err)
+		return fmt.Errorf("handshake Error: %w", err)
 	}
 
 	return nil
@@ -102,7 +104,7 @@ func (peer *Peer) waitForHandShake() (err error) {
 		return
 	}
 	if string(pstrBuf) != "BitTorrent protocol" {
-		return errors.New(fmt.Sprintf("Unidentified Protocol, %s", string(pstrBuf)))
+		return fmt.Errorf("unidentified Protocol, %s", string(pstrBuf))
 	}
 
 	other := make([]byte, 48) // 8 byte reserved, 20 byte info_hash, 20 byte peer_id
@@ -111,16 +113,16 @@ func (peer *Peer) waitForHandShake() (err error) {
 		return
 	}
 	if !bytes.Equal(peer.Torrent.InfoHash[:], other[8:28]) {
-		return errors.New("Unidentified infohash")
+		return errors.New("unidentified infohash")
 	}
 
 	copy(peer.id[:], other[28:48])
 
 	// Sending Bitfield ; we begin with empty bitfiled
-	bitfield_msg := bitfield{
+	bitfieldMsg := bitfield{
 		bitfield: make([]byte, int(math.Ceil(float64(peer.Torrent.NoOfPieces)/8.0))),
 	}
-	err = bitfield_msg.Send(peer)
+	err = bitfieldMsg.Send(peer)
 	if err != nil {
 		return
 	}
@@ -140,7 +142,6 @@ func (peer *Peer) StartListening() {
 		lenBuf := make([]byte, 4)
 		_, err = io.ReadFull(peer.conn, lenBuf)
 		if err != nil {
-			// TODO: LOG error (maybe other way of handling error)
 			peer.Close(err)
 			return
 		}
@@ -163,12 +164,12 @@ func (peer *Peer) StartListening() {
 			return
 		}
 
-		peer_msg, err := MsgParse(buf)
+		peerMsg, err := MsgParse(buf)
 		if err != nil {
 			peer.Close(err)
 			return
 		}
-		go peer_msg.Handle(peer)
+		go peerMsg.Handle(peer)
 		peer.lastNonKeepAliveResponse = time.Now()
 
 	}
@@ -206,34 +207,34 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 		if index >= 0 {
 			var err error
 
-			fmt.Println(index, peer.requested)
-			if !peer.state.am_intrested {
+			if !peer.state.amIntrested {
 				intrestedMessage := intrested{}
 				err = intrestedMessage.Send(peer)
-			} else if peer.state.peer_chocking {
+			} else if peer.state.peerChoking {
 				peer.mu.Unlock()
 				continue
 			} else {
-				blocks_requested := 0
+				blocksRequested := 0
 				for _, block := range peer.Torrent.GetRequiredBlocks(index) {
-					request_message := request{
+					requestMsg := request{
 						index:  uint32(index),
 						begin:  block[0],
 						length: block[1],
 					}
-					err = request_message.Send(peer)
+					err = requestMsg.Send(peer)
 					if err == nil {
-						blocks_requested++
+						blocksRequested++
 					} else {
-						fmt.Println(err)
+						slog.Error(err.Error())
 					}
 				}
-				if blocks_requested > 0 {
-					//fmt.Printf("Requested %d blocks of piece %d from %s\n",
-					//	blocks_requested, index,
-					//  peer.addr,
-					//)
-					peer.requested += blocks_requested
+				if blocksRequested > 0 {
+					slog.Debug(fmt.Sprintf(
+						"Requested %d blocks of piece %d from %s\n",
+						blocksRequested, index,
+						peer.addr,
+					))
+					peer.requested += blocksRequested
 				}
 			}
 			if err == nil {
@@ -255,11 +256,15 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 }
 
 func (peer *Peer) Close(err error) {
-	fmt.Printf("Closing peer, %v, error = %v\n", peer.addr, err)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Closing peer, %v, error = %v\n", peer.addr, err))
+	} else {
+		slog.Info(fmt.Sprintf("Closing Peer, %v", peer.addr))
+	}
 	if peer.conn != nil {
 		err := peer.conn.Close()
 		if err != nil && !errors.Is(err, net.ErrClosed) {
-			fmt.Printf("Error in closing peer %v, %v\n", peer.addr, err)
+			slog.Error(fmt.Sprintf("Error in closing peer %v, %v\n", peer.addr, err))
 		}
 	}
 	peer.stopPeer <- true

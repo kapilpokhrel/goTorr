@@ -106,6 +106,7 @@ type Torrent struct {
 	Fileorder       []string
 	BlockSize       uint16
 	PieceLength     uint64
+	CompletedPieces uint64
 	torrentinfoChan chan int `json:"-"`
 }
 
@@ -321,7 +322,7 @@ func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 	currTorrent.wg.Add(1)
 	go currTorrent.writeBlocktoFile(index, begin, piecedata)
 
-	// Check if piece is complete
+	// Check if blocks are complete
 	if all(currTorrent.Pieces[index].blocks) {
 		currTorrent.Pieces[index].completed = true
 
@@ -330,6 +331,7 @@ func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 		currTorrent.mu.Lock()
 		currTorrent.torrentinfoChan <- InfoPieceComplete
 		currTorrent.torrentinfoChan <- int(index)
+		currTorrent.CompletedPieces++
 		currTorrent.mu.Unlock()
 	}
 
@@ -366,12 +368,12 @@ func isPieceSet(bitfield []byte, index int) bool {
 
 func (currTorrent *Torrent) writeBlocktoFile(index, begin uint32, piecedata []byte) {
 	defer currTorrent.wg.Done()
-	absolute_offset := int64(index)*int64(currTorrent.PieceLength) + int64(begin)
-	infileOffset := absolute_offset
+	absoluteOffset := int64(index)*int64(currTorrent.PieceLength) + int64(begin)
+	infileOffset := absoluteOffset
 
 	dataoffset := int64(0)
 	remainingPiecedata := int64(len(piecedata))
-	for file_index, filepath := range currTorrent.Fileorder {
+	for fileIndex, filepath := range currTorrent.Fileorder {
 		file := currTorrent.Files[filepath]
 		if infileOffset >= file.size {
 			infileOffset -= file.size
@@ -392,7 +394,7 @@ func (currTorrent *Torrent) writeBlocktoFile(index, begin uint32, piecedata []by
 			file.filep.Sync()
 			currTorrent.mu.Lock()
 			currTorrent.torrentinfoChan <- InfoFileComplete
-			currTorrent.torrentinfoChan <- file_index
+			currTorrent.torrentinfoChan <- fileIndex
 			currTorrent.mu.Unlock()
 		}
 
@@ -406,8 +408,6 @@ func (currTorrent *Torrent) writeBlocktoFile(index, begin uint32, piecedata []by
 		break
 
 	}
-
-	return
 }
 
 func (currTorrent *Torrent) Close() {

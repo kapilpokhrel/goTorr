@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -10,15 +11,26 @@ import (
 	"goTorr/internal/peerprotocol"
 	"goTorr/internal/torrent"
 	"goTorr/internal/tracker"
+
+	"github.com/lmittmann/tint"
 )
 
 func check(e error) {
 	if e != nil {
+		slog.Error(e.Error())
 		panic(e)
 	}
 }
 
+func setupLogger() {
+	stdHandler := tint.NewHandler(os.Stdout, &tint.Options{Level: slog.LevelDebug})
+	logger := slog.New(stdHandler)
+	slog.SetDefault(logger)
+}
+
 func main() {
+	setupLogger()
+
 	args := os.Args
 	if len(args) <= 1 {
 		panic(fmt.Errorf("expected command line argument for torrent file to download"))
@@ -32,30 +44,28 @@ func main() {
 	check(err)
 
 	mdata.Print()
+
 	// Torrent
-	info_hash, err := mdata.GetInfoHash()
-	if err != nil {
-		check(err)
-	}
+	infoHash, err := mdata.GetInfoHash()
+	check(err)
 
 	torrentinfoChan := make(chan int)
 	currtorrent, err := torrent.NewTorrent(
-		info_hash,
+		infoHash,
 		mdata.TotalSize,
 		uint64(mdata.PieceLength),
 		mdata.Files,
 		mdata.FileOrder,
 		torrentinfoChan,
 	)
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 
 	// CLient
 	client := client.NewClient()
 
 	peercloseChan := make(chan string)
 	exitChan := make(chan int)
+
 	peerManager := peerprotocol.NewPeerManager(currtorrent, client.PeerID, peercloseChan)
 	trackerManager := tracker.NewTrackerManager(
 		mdata.AnnounceUrls,
@@ -67,6 +77,7 @@ func main() {
 	trackerManager.Start()
 
 	var wg sync.WaitGroup
+
 	infoListener := func() {
 		defer wg.Done()
 		for {
@@ -74,11 +85,11 @@ func main() {
 			case <-exitChan:
 				return
 			case peerAddr := <-peercloseChan:
-				fmt.Printf("Peer %s closed.\n", peerAddr)
+				slog.Debug(fmt.Sprintf("Peer %s closed.\n", peerAddr))
 				peerManager.RemovePeer(peerAddr)
 
 				if peerManager.Count() == 0 {
-					fmt.Println("No active peers left, exiting for now...")
+					slog.Info("No active peers left, exiting for now...")
 					exitChan <- 1
 					return
 				}
@@ -90,7 +101,14 @@ func main() {
 					return
 				case torrent.InfoPieceComplete:
 					pieceindex := <-torrentinfoChan
-					fmt.Printf("Piece %d complete.\n", pieceindex)
+
+					fmt.Printf(
+						"Piece %d complete. (%d/%d) %f %%. Active Peers: %d\n",
+						pieceindex, currtorrent.CompletedPieces,
+						len(mdata.Pieces),
+						float64(currtorrent.Downloaded)/float64(currtorrent.TotalSize)*100.0,
+						peerManager.ActiveCount(),
+					)
 				case torrent.InfoFileComplete:
 					fileindex := <-torrentinfoChan
 					fmt.Printf("File %s complete.\n", mdata.FileOrder[fileindex])
