@@ -90,7 +90,8 @@ func main() {
 
 				if peerManager.Count() == 0 {
 					slog.Info("No active peers left, exiting for now...")
-					exitChan <- 1
+					peerManager.Close()
+					currtorrent.Close()
 					return
 				}
 			case torrinfo := <-torrentinfoChan:

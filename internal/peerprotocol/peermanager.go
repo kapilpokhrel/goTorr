@@ -141,9 +141,13 @@ func (pm *PeerManager) Clear() {
 	clear(pm.peers)
 }
 
+func (pm *PeerManager) Close() {
+	pm.exitCh <- true
+}
+
 func (pm *PeerManager) Start() {
 	pm.AddPeers()
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(3 * time.Minute)
 	for {
 		select {
 		case <-pm.peerListUpdateCh:

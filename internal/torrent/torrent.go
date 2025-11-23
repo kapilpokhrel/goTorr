@@ -4,6 +4,7 @@ import (
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -181,6 +182,7 @@ func (currTorrent *Torrent) load() error {
 	if err != nil {
 		return err
 	}
+
 	for k := range currTorrent.Files {
 		filep, err := os.OpenFile(fname, os.O_APPEND, os.ModeAppend)
 		if err != nil {
@@ -337,6 +339,7 @@ func (currTorrent *Torrent) WriteBlock(index, begin uint32, piecedata []byte) {
 
 	if currTorrent.Downloaded == currTorrent.TotalSize {
 		// Download Complete
+		slog.Info("Download complete, waiting to finish writing to files")
 		currTorrent.wg.Wait()
 
 		currTorrent.deleteSave()

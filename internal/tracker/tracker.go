@@ -221,12 +221,13 @@ func parseHTTPAnnounceResp(httpResp []byte) (parsedResp trackerResp, err error) 
 		seeders = respMap["incomplete"].(int64)
 	}
 
-	decodedPeers := respMap["peers"].([]any)
-	peers := make([]map[string]any, len(decodedPeers))
-	for i := range decodedPeers {
-		peers[i] = decodedPeers[i].(map[string]any)
+	var peersList []string
+	switch decodedPeers := respMap["peers"].(type) {
+	case string:
+		peersList, _ = parseBinaryPeers([]byte(decodedPeers))
+	case []map[string]any:
+		peersList, _ = parseDictionaryPeers(decodedPeers)
 	}
-	peersList, _ := parseDictionaryPeers(peers)
 	return trackerResp{
 		int(interval),
 		int(minInterval),

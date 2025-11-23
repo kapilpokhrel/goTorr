@@ -200,19 +200,21 @@ func (peer *Peer) PeerChecker(interval time.Duration) {
 			continue
 		}
 
+		if peer.state.peerChoking {
+			peer.mu.Unlock()
+			continue
+		}
 		index := peer.Torrent.GetRarestPieceIndex(peer.bitfield,
 			peer.addr,
 		)
 
+		slog.Debug(fmt.Sprintf("Requesting from peer %s", peer.addr), "index", index)
 		if index >= 0 {
 			var err error
 
 			if !peer.state.amIntrested {
 				intrestedMessage := intrested{}
 				err = intrestedMessage.Send(peer)
-			} else if peer.state.peerChoking {
-				peer.mu.Unlock()
-				continue
 			} else {
 				blocksRequested := 0
 				for _, block := range peer.Torrent.GetRequiredBlocks(index) {
